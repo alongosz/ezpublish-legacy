@@ -574,7 +574,7 @@ class eZPostgreSQLDB extends eZDBInterface
 
         if ( $this->isConnected() )
         {
-            $sql = "SELECT currval( '" . $table . "_s')";
+            $sql = "SELECT currval( '{$this->getSequenceName($table, $column)}' )";
             $result = pg_query( $this->DBConnection, $sql );
             if ( !$result )
             {
@@ -691,6 +691,60 @@ class eZPostgreSQLDB extends eZDBInterface
     }
 
     /// \privatesection
+
+    /**
+     *
+     * @var string[]
+     */
+    private static $sequenceNamesCache = [];
+
+    /**
+     * Get sequence name associated with database table column default value.
+     *
+     * @param string $table database table name
+     * @param string $column database column name
+     *
+     * @return string
+     */
+    private function getSequenceName($table, $column)
+    {
+        if ( $this->isConnected() )
+        {
+            $cacheKey = $table . '_' . $column;
+            if ( !isset(self::$sequenceNamesCache[$cacheKey]) ) {
+                $sql = <<<SQL
+SELECT column_default
+FROM information_schema.columns
+WHERE table_name = '{$table}' AND column_name = '{$column}'
+SQL;
+
+                $result = pg_query( $this->DBConnection, $sql );
+                if ( !$result )
+                {
+                    eZDebug::writeError( "Error: error executing query: $sql " . pg_last_error( $this->DBConnection ), "eZPostgreSQLDB" );
+                }
+
+                if ( $result )
+                {
+                    $row = pg_fetch_row( $result, 0 );
+                    // extract sequence name from default value
+                    self::$sequenceNamesCache[$cacheKey] = !empty($row[0]) ?
+                        preg_replace("/nextval.+'(.+)'.*/", '\1', $row[0])
+                        : null;
+                }
+
+                // assume fallback default if not found due to either DB error or empty result set
+                if ( empty(self::$sequenceNamesCache[$cacheKey]) )
+                {
+                    self::$sequenceNamesCache[$cacheKey] = $table . '_s';
+                }
+            }
+
+            return self::$sequenceNamesCache[$cacheKey];
+        }
+
+        return null;
+    }
 
 }
 
